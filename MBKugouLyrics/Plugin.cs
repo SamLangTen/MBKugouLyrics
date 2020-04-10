@@ -3,6 +3,9 @@ using System.Runtime.InteropServices;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.IO;
+using Newtonsoft.Json;
 
 namespace MusicBeePlugin
 {
@@ -10,7 +13,16 @@ namespace MusicBeePlugin
     {
         private MusicBeeApiInterface mbApiInterface;
         private PluginInfo about = new PluginInfo();
-
+        private ConfigPanel _settingPanel;
+        private ConfigPanel settingPanel
+        {
+            get
+            {
+                if (_settingPanel == null || _settingPanel.IsDisposed)
+                    _settingPanel = new ConfigPanel();
+                return _settingPanel;
+            }
+        }
         public PluginInfo Initialise(IntPtr apiInterfacePtr)
         {
             mbApiInterface = new MusicBeeApiInterface();
@@ -27,7 +39,7 @@ namespace MusicBeePlugin
             about.MinInterfaceVersion = MinInterfaceVersion;
             about.MinApiRevision = 23;
             about.ReceiveNotifications = (ReceiveNotificationFlags.PlayerEvents | ReceiveNotificationFlags.TagEvents);
-            about.ConfigurationPanelHeight = 0;   // height in pixels that musicbee should reserve in a panel for config settings. When set, a handle to an empty panel will be passed to the Configure function
+            about.ConfigurationPanelHeight = settingPanel.Height;   // height in pixels that musicbee should reserve in a panel for config settings. When set, a handle to an empty panel will be passed to the Configure function
             return about;
         }
 
@@ -38,6 +50,18 @@ namespace MusicBeePlugin
             // panelHandle will only be set if you set about.ConfigurationPanelHeight to a non-zero value
             // keep in mind the panel width is scaled according to the font the user has selected
             // if about.ConfigurationPanelHeight is set to 0, you can display your own popup window
+
+            if (panelHandle == IntPtr.Zero) return false;
+            var configPanel = (Panel)Control.FromHandle(panelHandle);
+            configPanel.Controls.Clear();
+            configPanel.Controls.Add(settingPanel);
+
+            if (File.Exists(Path.Combine(dataPath, "mbkugoulyrics.json")))
+            {
+                var config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(Path.Combine(dataPath, "mbkugoulyrics.json")));
+                settingPanel.KgMid = config.KgMid;
+            }
+
             return false;
         }
 
@@ -47,6 +71,26 @@ namespace MusicBeePlugin
         {
             // save any persistent settings in a sub-folder of this path
             string dataPath = mbApiInterface.Setting_GetPersistentStoragePath();
+
+            //Set 
+            var config = new Config();
+            if (settingPanel.KgMid == "")
+            {
+                using (var md5hash = MD5.Create())
+                {
+                    config.KgMid = KugouRetrieval.GetMd5Hash(md5hash, KugouRetrieval.GeneratedGuid());
+                }
+            }
+            else
+            {
+                config.KgMid = settingPanel.KgMid;
+            }
+
+            //Save
+            var jsonText = JsonConvert.SerializeObject(config);
+            File.WriteAllText(Path.Combine(dataPath, "mbkugoulyrics.json"), jsonText);
+            //Apply
+            KugouRetrieval.KgMid = config.KgMid;
         }
 
         // MusicBee is closing the plugin (plugin is being disabled by user or MusicBee is shutting down)
@@ -57,6 +101,9 @@ namespace MusicBeePlugin
         // uninstall this plugin - clean up any persisted files
         public void Uninstall()
         {
+            string dataPath = mbApiInterface.Setting_GetPersistentStoragePath();
+            dataPath = Path.Combine(dataPath, "mbkugoulyrics.json");
+            if (File.Exists(dataPath)) File.Delete(dataPath);
         }
 
         // receive event notifications from MusicBee
@@ -64,6 +111,34 @@ namespace MusicBeePlugin
         public void ReceiveNotification(string sourceFileUrl, NotificationType type)
         {
             // perform some action depending on the notification type
+            switch (type)
+            {
+                case NotificationType.PluginStartup:
+                    //Load Setting
+                    string dataPath = mbApiInterface.Setting_GetPersistentStoragePath();
+                    if (File.Exists(Path.Combine(dataPath, "mbkugoulyrics.json")))
+                    {
+                        var config = JsonConvert.DeserializeObject<Config>(File.ReadAllText(Path.Combine(dataPath, "mbkugoulyrics.json")));
+                        KugouRetrieval.KgMid = config.KgMid;
+                    }
+                    else
+                    {
+                        using (var md5hash = MD5.Create())
+                        {
+                            KugouRetrieval.KgMid = KugouRetrieval.GetMd5Hash(md5hash, KugouRetrieval.GeneratedGuid());
+                        }
+                    }
+
+                    //Load Localization
+                    var langDic = new Dictionary<string, string>();
+                    langDic["Language"] = "en";
+                    langDic["语言"] = "zh-Hans";
+                    var mbLang = mbApiInterface.MB_GetLocalisation("Main.field.173", "Language");
+                    LocalizationManager.Language = langDic.ContainsKey(mbLang) ? langDic[mbLang] : "en";
+                    break;
+                default:
+                    break;
+            }
         }
 
         // return an array of lyric or artwork provider names this plugin supports
@@ -78,10 +153,22 @@ namespace MusicBeePlugin
         // return null if no lyrics are found
         public string RetrieveLyrics(string sourceFileUrl, string artist, string trackTitle, string album, bool synchronisedPreferred, string provider)
         {
-            var filehash = KugouRetrieval.Search(trackTitle, artist);
-            if (filehash == null) return null;
-            var lyrics = KugouRetrieval.GetLyrics(filehash);
-            return lyrics;
+            if (provider == "Kugou Music")
+            {
+                var filehash = KugouRetrieval.Search(trackTitle, artist);
+                if (filehash == null) return null;
+                try
+                {
+                    var lyrics = KugouRetrieval.GetLyrics(filehash);
+                    return lyrics;
+                }
+                catch (KugouSeverException)
+                {
+                    MessageBox.Show(LocalizationManager.ServerErrorRecaptcha);
+                    return null;
+                }
+            }
+            return null;
         }
 
         // return Base64 string representation of the artwork binary data from the requested provider

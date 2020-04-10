@@ -56,13 +56,27 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Config.cs" />
+    <Compile Include="ConfigPanel.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="ConfigPanel.Designer.cs">
+      <DependentUpon>ConfigPanel.cs</DependentUpon>
+    </Compile>
     <Compile Include="KugouRetrieval.cs" />
+    <Compile Include="KugouSeverException.cs" />
+    <Compile Include="LocalizationManager.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="MusicBeeInterface.cs" />
     <Compile Include="Plugin.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="ConfigPanel.resx">
+      <DependentUpon>ConfigPanel.cs</DependentUpon>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

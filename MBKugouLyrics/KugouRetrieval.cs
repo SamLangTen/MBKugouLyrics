@@ -13,6 +13,9 @@ namespace MusicBeePlugin
 {
     class KugouRetrieval
     {
+
+        public static string KgMid { get; set; }
+
         public static string Search(string title, string artist)
         {
             using (var client = new WebClient())
@@ -34,18 +37,16 @@ namespace MusicBeePlugin
             using (var client = new WebClient())
             {
 
-                var kgMid = Guid.NewGuid().ToString();
-                using (var md5hash = MD5.Create())
-                {
-                    kgMid = GetMd5Hash(md5hash, kgMid);
-                }
-
                 client.Headers.Add(HttpRequestHeader.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36");
-                client.Headers.Add(HttpRequestHeader.Cookie, $"kg_mid={kgMid};");
+                client.Headers.Add(HttpRequestHeader.Cookie, $"kg_mid={KgMid};kg_mid_temp={KgMid}");
 
                 var data = client.DownloadData($"https://wwwapi.kugou.com/yy/index.php?r=play/getdata&hash={filehash}");
                 var text = System.Text.Encoding.UTF8.GetString(data);
                 var json = JObject.Parse(text);
+                if (json["err_code"].Value<int>() != 0)
+                {
+                    throw new KugouSeverException(json["err_code"].Value<int>());
+                }
                 var lyrics = json["data"]["lyrics"].Value<string>();
                 if (lyrics == null) return null;
                 //Remove tag
@@ -64,7 +65,7 @@ namespace MusicBeePlugin
             }
         }
 
-        private static string GetMd5Hash(MD5 md5Hash, string input)
+        public static string GetMd5Hash(MD5 md5Hash, string input)
         {
 
             // Convert the input string to a byte array and compute the hash.
@@ -84,7 +85,13 @@ namespace MusicBeePlugin
             // Return the hexadecimal string.
             return sBuilder.ToString();
         }
-    }
 
+        public static string GeneratedGuid()
+        {
+            Func<string> S4 = () => { return Convert.ToString((Convert.ToInt32(Math.Round((1 + new Random().NextDouble()) * 0x10000)) | 0), 16).Substring(1); };
+            return (S4() + S4() + "-" + S4() + "-" + S4() + "-" + S4() + "-" + S4() + S4() + S4());
+        }
+
+    }
 }
 
